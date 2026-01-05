@@ -7,8 +7,14 @@ import MetaTrader5 as mt5
 import pandas as pd
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import sys
+import io
+
+# Nastavení kódování pro Windows konzoli
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Konfigurace
 INSTRUMENTS = ["XAUUSD", "EURUSD"]
@@ -60,10 +66,10 @@ def initialize_mt5(credentials):
         mt5.shutdown()
         sys.exit(1)
     
-    print("✓ Úspěšně připojeno k MT5")
+    print("[OK] Uspesne pripojeno k MT5")
     account_info = mt5.account_info()
     if account_info:
-        print(f"✓ Přihlášeno jako: {account_info.login} ({account_info.server})")
+        print(f"[OK] Prihlaseno jako: {account_info.login} ({account_info.server})")
     return True
 
 def get_symbol_info(symbol):
@@ -90,14 +96,48 @@ def download_data(symbol, timeframe, timeframe_name, days_back=365):
     if symbol_info is None:
         return None
     
-    # Vypočítej datum začátku
-    from_date = datetime.now() - timedelta(days=days_back)
+    # Vypočítej datum začátku a konce
+    # Použij UTC čas, protože MT5 pracuje s UTC
+    to_date = datetime.now(timezone.utc)
+    from_date = to_date - timedelta(days=days_back)
     
-    # Stáhni data
-    rates = mt5.copy_rates_from(symbol, timeframe, from_date, days_back * 24 * 60 // 5)  # Odhad počtu svíček
+    # Vypočítej přibližný počet svíček podle timeframu
+    if timeframe == mt5.TIMEFRAME_M5:
+        # Pro M5 zkus použít copy_rates_range s plným rozsahem
+        rates = mt5.copy_rates_range(symbol, timeframe, from_date, to_date)
+        
+        if rates is None or len(rates) == 0:
+            # Pokud copy_rates_range nefunguje, zkus copy_rates_from s aktuálním časem
+            max_count = 100000
+            rates = mt5.copy_rates_from(symbol, timeframe, to_date, max_count)
+        
+        if rates is None or len(rates) == 0:
+            # Zkus s from_date a menším počtem
+            count = min(days_back * 24 * 12, 100000)
+            rates = mt5.copy_rates_from(symbol, timeframe, from_date, count)
+    elif timeframe == mt5.TIMEFRAME_M10:
+        count = days_back * 24 * 6  # 6 svíček za hodinu
+        # Pro ostatní timeframy zkus nejprve copy_rates_range
+        rates = mt5.copy_rates_range(symbol, timeframe, from_date, to_date)
+        # Pokud to nefunguje, použij copy_rates_from
+        if rates is None or len(rates) == 0:
+            rates = mt5.copy_rates_from(symbol, timeframe, from_date, count)
+    elif timeframe == mt5.TIMEFRAME_M15:
+        count = days_back * 24 * 4  # 4 svíčky za hodinu
+        # Pro ostatní timeframy zkus nejprve copy_rates_range
+        rates = mt5.copy_rates_range(symbol, timeframe, from_date, to_date)
+        # Pokud to nefunguje, použij copy_rates_from
+        if rates is None or len(rates) == 0:
+            rates = mt5.copy_rates_from(symbol, timeframe, from_date, count)
+    else:
+        count = days_back * 24 * 12
+        rates = mt5.copy_rates_range(symbol, timeframe, from_date, to_date)
+        if rates is None or len(rates) == 0:
+            rates = mt5.copy_rates_from(symbol, timeframe, from_date, count)
     
     if rates is None or len(rates) == 0:
-        print(f"  ⚠ Varování: Nepodařilo se stáhnout data pro {symbol} ({timeframe_name})")
+        print(f"  [VAROVANI] Nepodarilo se stahnout data pro {symbol} ({timeframe_name})")
+        print(f"  Chyba MT5: {mt5.last_error()}")
         return None
     
     # Vytvoř DataFrame
@@ -128,9 +168,9 @@ def download_data(symbol, timeframe, timeframe_name, days_back=365):
                      'is_bullish', 'point', 'digits']
     df = df[columns_order]
     
-    print(f"  ✓ Staženo {len(df)} svíček")
-    print(f"  ✓ Datum od: {df['time'].min()}")
-    print(f"  ✓ Datum do: {df['time'].max()}")
+    print(f"  [OK] Stazeno {len(df)} svicek")
+    print(f"  [OK] Datum od: {df['time'].min()}")
+    print(f"  [OK] Datum do: {df['time'].max()}")
     
     return df
 
@@ -149,7 +189,7 @@ def save_data(df, symbol, timeframe_name):
     
     # Ulož do CSV
     df.to_csv(filename, index=False, encoding='utf-8-sig')
-    print(f"  ✓ Data uložena do: {filename}")
+    print(f"  [OK] Data ulozena do: {filename}")
     
     return filename
 
@@ -167,7 +207,7 @@ def main():
     if credentials.get("login") == "YOUR_LOGIN_HERE" or \
        credentials.get("password") == "YOUR_PASSWORD_HERE" or \
        credentials.get("server") == "YOUR_SERVER_HERE":
-        print("\n⚠ VAROVÁNÍ: Nezapomeňte vyplnit přihlašovací údaje v mt5_credentials.json!")
+        print("\n[VAROVANI] Nezapomente vyplnit prihlasovaci udaje v mt5_credentials.json!")
         print("Pokračuji s aktuálními údaji...")
     
     # Inicializuj MT5
@@ -188,7 +228,7 @@ def main():
                     if filename:
                         all_files.append(filename)
             except Exception as e:
-                print(f"  ✗ Chyba při stahování {instrument} ({timeframe_name}): {e}")
+                print(f"  [CHYBA] Chyba pri stahovani {instrument} ({timeframe_name}): {e}")
     
     # Ukonči připojení
     mt5.shutdown()
@@ -200,7 +240,7 @@ def main():
     print(f"\nCelkem uloženo souborů: {len(all_files)}")
     for filename in all_files:
         print(f"  - {filename}")
-    print("\n✓ Hotovo!")
+    print("\n[OK] Hotovo!")
 
 if __name__ == "__main__":
     try:
@@ -210,7 +250,7 @@ if __name__ == "__main__":
         mt5.shutdown()
         sys.exit(0)
     except Exception as e:
-        print(f"\n✗ Neočekávaná chyba: {e}")
+        print(f"\n[CHYBA] Neocekavana chyba: {e}")
         mt5.shutdown()
         sys.exit(1)
 
