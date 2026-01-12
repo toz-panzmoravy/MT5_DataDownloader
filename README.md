@@ -41,7 +41,7 @@ graph LR
 **Detailed steps:**
 
 1. **Install** Python 3.7+ and MetaTrader 5
-2. **Configure** your MT5 credentials in `mt5_credentials.json`
+2. **Copy** `mt5_credentials.json.example` to `mt5_credentials.json` and fill in your credentials
 3. **Run** `run_downloader.bat` or execute `py mt5_downloader.py`
 4. **Check** the `data/` folder for CSV files
 5. **Analyze** the downloaded data in your preferred tool
